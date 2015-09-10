@@ -1,0 +1,196 @@
+create or replace TRIGGER IMP_TO_TM_ON_DELETE 
+after delete on IMP_INFO 
+FOR EACH ROW
+begin
+  DELETE FROM TM_MAIN WHERE IMP_NO = :old.imp_no;
+END;
+
+
+
+
+
+
+create or replace trigger IMP_TO_TM_ON_UPDATE_OTHERS 
+AFTER UPDATE OF PAYMENT_DATE, FINAL_YN, ADVANCE_YN, TYPE_CODE, SHIP_PORT, COUNTRY_CODE ON IMP_INFO 
+for each row 
+declare
+	
+	V_PURPOSE_CODE_BB     	VARCHAR2(10);
+	V_PURPOSE_CODE_SBB    	VARCHAR2(5);
+	V_ADVANCE_YN_N 			VARCHAR2(1);
+	V_ADVANCE_YN_O 			VARCHAR2(1);
+	
+	V_ENT_DATE DATE;
+	V_ENT_DATE_II DATE;
+	
+begin
+    
+	V_ENT_DATE 		:= TO_DATE('31-AUG-2015', 'DD-MON-YYYY');
+    V_ENT_DATE_II	:= :old.ENT_DATE;
+  
+    IF (V_ENT_DATE_II > V_ENT_DATE) THEN
+		--update confirmation
+		if(:new.FINAL_YN = 'Y' and :old.FINAL_YN IS NULL) then
+		  update TM_MAIN set CONFIRMED = '1' where IMP_NO = :old.IMP_NO and CONFIRMED is null;
+		end if;
+		
+		--updating tm-date
+		if(:new.PAYMENT_DATE <> :old.PAYMENT_DATE) then
+		  update TM_MAIN set TM_DATE = :new.PAYMENT_DATE where IMP_NO = :old.IMP_NO;
+		end if;
+		
+		--updating country code
+		if(:new.COUNTRY_CODE <> :old.COUNTRY_CODE) then
+		  update TM_MAIN set COUNTRY_CODE = :new.COUNTRY_CODE where IMP_NO = :old.IMP_NO;
+		end if;
+		
+		--updating purpose code for freight amount
+		V_ADVANCE_YN_N := NVL(:new.ADVANCE_YN, 'N');
+		V_ADVANCE_YN_O := NVL(:old.ADVANCE_YN, 'N');
+		
+		if(V_ADVANCE_YN_N <> V_ADVANCE_YN_O or :new.TYPE_CODE <> :old.TYPE_CODE or :new.SHIP_PORT <> :old.SHIP_PORT) THEN 
+			V_PURPOSE_CODE_SBB := F_IMP_TO_TM_GET_PCODE(:new.ADVANCE_YN, :new.TYPE_CODE, :new.SHIP_PORT);
+			SELECT PURPOSE_CODE_BB INTO V_PURPOSE_CODE_BB FROM PURPOSE WHERE PURPOSE_CODE_SBB = V_PURPOSE_CODE_SBB AND TYPE = 4 and LEAF = 'Y';
+		  update TM_MAIN
+				 set PURPOSE_CODE_SBB = V_PURPOSE_CODE_SBB,
+					 PURPOSE_CODE_BB  = V_PURPOSE_CODE_BB
+				 where IMP_NO = :old.IMP_NO and PURPOSE_CODE_SBB not in ('2240', '2310');
+		end if;
+	END IF;
+    
+END;
+
+
+
+
+
+
+
+create or replace FUNCTION F_IMP_TO_TM_GET_PCODE 
+(	
+	ADVANCE_YN_II			varchar2,
+	TYPE_CODE_II			varchar2,
+	SHIP_PORT_II			number
+  
+) RETURN VARCHAR2 AS 
+
+	V_PURPOSE_CODE_SBB     	VARCHAR2(5);
+
+BEGIN
+  
+  	/*TRANSPORT_TYPE
+		01	Bill of Lading (B/L) -sea
+		02	Railway Receipt
+		03	Airway Bill
+		04	Truck Receipt
+		05	Post Parcel Receipt
+		06	FCR - Forwarders Cargo Receipt -sea` 
+		07	HAWB - House Airway Bill -air*/ 
+		IF ADVANCE_YN_II = 'Y' THEN
+			/*1	CHITTAGONG
+			2	MONGLA
+			3	BENAPOL
+			4	HILLI
+			5	TAMABIL
+			6	SHONA MOSHJID
+			7	BANGLA BANDHA
+			8	SHAHAJALAL  INTERNATIONAL AIRPORT
+			9	BHOMRA PORT
+			10	EPZ
+			11	Others
+			12	Burimari
+			13	Akhawora
+			14	Bibir Bazar LCStation, Comilla
+			15	Pangaon
+			16	Osmani International Airport
+			17	Shah Amanat International Airport*/
+			IF SHIP_PORT_II in (1, 2) THEN
+				V_PURPOSE_CODE_SBB := '0024'; --sea
+			ELSIF SHIP_PORT_II in (8, 16, 17) THEN
+				V_PURPOSE_CODE_SBB := '0124'; --air
+			ELSE
+				V_PURPOSE_CODE_SBB := '0321'; --land
+			END IF;
+			
+		ELSIF TYPE_CODE_II in ('02') then
+			 V_PURPOSE_CODE_SBB := '0221'; --railway
+		ELSIF TYPE_CODE_II in ('04', '05') THEN
+			 V_PURPOSE_CODE_SBB := '0321'; --land
+		ELSIF TYPE_CODE_II in ('03', '07') THEN
+			 V_PURPOSE_CODE_SBB := '0124';--Air
+		ELSIF TYPE_CODE_II in ('01', '06') THEN
+			 V_PURPOSE_CODE_SBB := '0024';--sea
+		ELSE
+			 V_PURPOSE_CODE_SBB := '0321'; --land
+		END IF;		
+			
+		
+	return V_PURPOSE_CODE_SBB;	
+  
+	----Any exception
+	EXCEPTION
+	  when OTHERS then
+          return 'FAIL';
+      
+END F_IMP_TO_TM_GET_PCODE;
+
+
+
+
+
+
+
+
+
+create or replace FUNCTION F_IMP_TO_TM_GET_MOP_SFC(
+      PAY_SOURCE_II in number ,
+      AMOUNT        in number ,
+      V_MOP_CASH    OUT number ,
+      V_MOP_MT      OUT number ,
+      V_SFC_BANK    OUT varchar2 ,
+      V_SFC_ERQ     OUT varchar2 ,
+      V_SFC_FC_AC   OUT varchar2 ,
+      V_SFC_OTHER   OUT VARCHAR2 )
+    RETURN VARCHAR2
+  AS
+  BEGIN
+    
+    --initiate to zero
+    V_MOP_CASH   := 0;
+    V_MOP_MT     := 0;
+    V_SFC_BANK   := '0';
+    V_SFC_ERQ    := '0';
+    V_SFC_FC_AC  := '0';
+    V_SFC_OTHER  := '0';
+    
+    /*IMP_PAY_SOURCE
+		1	Cash
+		2	ERQ
+		3	Loan Grant
+		4	EDF
+		5	FC Account
+		6	Export Proceeds
+		7	Forced Loan
+		8	Buyer's Credit
+		9	Supplier's Credit*/		
+    
+    if PAY_SOURCE_II in (1) then	
+			V_MOP_CASH 	:= AMOUNT;  
+    else
+      V_MOP_MT 	  := AMOUNT;
+    end if;
+    
+		IF PAY_SOURCE_II IN (1) THEN	
+			V_SFC_BANK 	:= AMOUNT;	
+		ELSIF PAY_SOURCE_II IN (2) THEN
+			V_SFC_ERQ 	:= AMOUNT;		
+		ELSIF PAY_SOURCE_II IN (5) THEN
+			V_SFC_FC_AC := AMOUNT;
+		ELSE
+			V_SFC_OTHER := AMOUNT;			
+		END IF;
+    
+    
+    return null;
+    
+  END F_IMP_TO_TM_GET_MOP_SFC;
