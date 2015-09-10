@@ -54,8 +54,13 @@ begin
 		  V_MSG := F_IMP_TO_TM_UPDATE(:old.IMP_NO, V_F_AMOUNT_N, V_F_AMOUNT_O,  V_I_AMOUNT_N, V_I_AMOUNT_O, V_C_AMOUNT_N, V_C_AMOUNT_O, :new.CURRENCY_CODE, :old.CURRENCY_CODE, :new.PAYMENT_DATE, :old.PAY_SOURCE, :new.PAY_SOURCE);      
 	  end if;
   END IF;
-  
 END;
+
+
+
+
+
+
 
 create or replace FUNCTION F_IMP_TO_TM_UPDATE 
 (

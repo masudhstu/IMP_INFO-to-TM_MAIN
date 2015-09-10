@@ -141,7 +141,6 @@ END F_IMP_TO_TM_GET_PCODE;
 
 
 
-
 create or replace FUNCTION F_IMP_TO_TM_GET_MOP_SFC(
       PAY_SOURCE_II in number ,
       AMOUNT        in number ,
