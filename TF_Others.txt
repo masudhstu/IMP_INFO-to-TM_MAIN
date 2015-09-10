@@ -173,11 +173,11 @@ create or replace FUNCTION F_IMP_TO_TM_GET_MOP_SFC(
 		8	Buyer's Credit
 		9	Supplier's Credit*/		
     
-    if PAY_SOURCE_II in (1) then	
-			V_MOP_CASH 	:= AMOUNT;  
-    else
-      V_MOP_MT 	  := AMOUNT;
-    end if;
+		if PAY_SOURCE_II in (1) then	
+				V_MOP_CASH 	:= AMOUNT;  
+		else
+		  V_MOP_MT 	  := AMOUNT;
+		end if;
     
 		IF PAY_SOURCE_II IN (1) THEN	
 			V_SFC_BANK 	:= AMOUNT;	
